@@ -6,7 +6,7 @@
 
 A tool for [Pi coding agent](https://github.com/badlogic/pi-mono/) that presents multi-slide visual decision decks in the browser. Each slide shows 2-4 high-fidelity previews — code diffs, architecture diagrams, UI mockups — and you pick one per slide. The agent gets back a clean selection map and moves on to implementation.
 
-https://github.com/user-attachments/assets/aff1bac6-8bc2-461a-8828-f588ce655f7f
+<img width="1340" alt="Design Deck screenshot" src="https://github.com/user-attachments/assets/20864ac6-9223-4e2e-ba3c-db3eaae0abd8" />
 
 ## Usage
 
@@ -41,6 +41,8 @@ Restart pi to load the extension and the bundled `design-deck` skill.
 
 **Requirements:**
 - pi-agent v0.35.0 or later (extensions API)
+
+https://github.com/user-attachments/assets/aff1bac6-8bc2-461a-8828-f588ce655f7f
 
 ## Quick Start
 
@@ -178,7 +180,7 @@ The browser shows the new option with an entry animation. The tool blocks again,
 
 ### Model Override
 
-The deck shows a model dropdown when 2+ models are available. Users pick which model generates new options. When a model other than the current one is selected, the generate-more result instructs the agent to delegate to a subagent with that model.
+The deck shows a model dropdown when 2+ models are available. Users pick which model generates new options. When a model other than the current one is selected, the generate-more result instructs the agent to use the built-in `deck_generate` tool, which spawns pi headlessly with that model.
 
 The default model can be set in the UI (saved to settings) or in `settings.json`:
 
@@ -286,6 +288,7 @@ Three modes of invocation:
 pi-design-deck/
 ├── index.ts             # Tool registration, module-level state, lifecycle
 ├── generate-prompts.ts  # Prompt builders for generate-more / regenerate
+├── model-runner.ts      # Headless pi spawner for deck_generate tool
 ├── deck-schema.ts       # TypeScript types and validation (no dependencies)
 ├── deck-server.ts       # HTTP server, SSE, asset serving, snapshots
 ├── server-utils.ts      # Shared HTTP/session utilities
