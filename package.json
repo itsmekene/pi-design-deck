@@ -1,6 +1,6 @@
 {
   "name": "pi-design-deck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Visual design deck for presenting multi-slide options with high-fidelity previews",
   "author": "Nico Bailon",
   "license": "MIT",
@@ -16,6 +16,7 @@
     "model-runner.ts",
     "server-utils.ts",
     "settings.ts",
+    "export-html.ts",
     "index.ts"
   ],
   "scripts": {

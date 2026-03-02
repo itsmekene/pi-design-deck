@@ -21,6 +21,9 @@ let events = null;
 let heartbeatTimer = null;
 let isClosed = false;
 let isSubmitting = false;
+let isDirty = false;
+let lastSavedLabel = "";
+let isRestoringSelections = false;
 
 const selections = {};
 const optionNotes = {};
@@ -35,6 +38,8 @@ const progressFill = document.getElementById("progress-fill");
 const slidesWrap = document.getElementById("slides-wrap");
 const btnBack = document.getElementById("btn-back");
 const btnNext = document.getElementById("btn-next");
+const btnSave = document.getElementById("btn-save");
+const saveStatus = document.getElementById("save-status");
 
 // ─── UTILITIES ───────────────────────────────────────────────
 
@@ -72,6 +77,47 @@ function setMetaLabel() {
 		return;
 	}
 	deckTitle.textContent = title;
+}
+
+function formatSavedTimestamp(value) {
+	try {
+		return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+	} catch {
+		return "";
+	}
+}
+
+function updateSaveStatus() {
+	if (saveStatus) {
+		if (isDirty) {
+			saveStatus.textContent = "Unsaved changes";
+			saveStatus.classList.add("dirty");
+			saveStatus.classList.remove("saved");
+		} else if (lastSavedLabel) {
+			saveStatus.textContent = `Saved ${lastSavedLabel}`;
+			saveStatus.classList.add("saved");
+			saveStatus.classList.remove("dirty");
+		} else {
+			saveStatus.textContent = "No unsaved changes";
+			saveStatus.classList.remove("dirty", "saved");
+		}
+	}
+	if (btnSave) {
+		btnSave.disabled = isClosed;
+		btnSave.classList.toggle("dirty", isDirty);
+	}
+}
+
+function markDirty() {
+	if (isClosed) return;
+	isDirty = true;
+	updateSaveStatus();
+}
+
+function markSaved(savedAt) {
+	isDirty = false;
+	lastSavedLabel = formatSavedTimestamp(savedAt || new Date().toISOString());
+	updateSaveStatus();
 }
 
 // ─── THEME SYSTEM ────────────────────────────────────────────

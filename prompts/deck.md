@@ -1,7 +1,9 @@
 ---
 description: Present visual design options via design deck
 ---
-Load the `design-deck` skill for the full format reference. Analyze the current codebase and context, and present concrete visual options using `design_deck`.
+Load the `design-deck` skill for the full format reference. If presenting UI component options (tabs, trees, buttons, accordions, etc.), also read the relevant file from the skill's `references/component-gallery/` directory — it has visual vocabulary across design systems plus guidance on when to use distinct systems vs variations of the same approach.
+
+Analyze the current codebase and context, and present concrete visual options using `design_deck`.
 
 Read relevant files aggressively first so you understand the real constraints before generating options. If there's a plan or PRD, read it in full along with every codebase file it references — understand the actual state of the code, not just what the document assumes. Then identify the key design and architecture decisions and present options for each.
 

@@ -1,7 +1,9 @@
 ---
 description: Interview to gather requirements, then present design options
 ---
-Load the `design-deck` skill for the full format reference. This is a two-phase flow.
+Load the `design-deck` skill for the full format reference. If presenting UI component options (tabs, trees, buttons, accordions, etc.), also read the relevant file from the skill's `references/component-gallery/` directory — it has visual vocabulary across design systems plus guidance on when to use distinct systems vs variations of the same approach.
+
+This is a two-phase flow.
 
 **Phase 1 — Discovery.** Before proposing anything, interview me in depth. Read relevant codebase context first so your questions are informed. Then hit me with detailed questions about goals, constraints, audience, aesthetics, technical requirements, trade-offs, edge cases, and anything else that would affect the design options. No obvious questions. Keep interviewing in multiple rounds if earlier answers surface new dimensions worth exploring — only move on when you have enough to generate genuinely distinct options.
 

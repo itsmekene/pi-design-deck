@@ -41,11 +41,26 @@ function showSaveToast(message, isError) {
 	saveToastTimer = setTimeout(() => { toast.classList.add("hidden"); saveToastTimer = null; }, 3000);
 }
 
+function buildSelectedNotes() {
+	const notes = {};
+	for (const [slideId, noteData] of Object.entries(optionNotes)) {
+		if (noteData && selections[slideId] === noteData.label && noteData.notes) {
+			notes[slideId] = noteData.notes;
+		}
+	}
+	return notes;
+}
+
 async function saveDeck() {
 	if (isClosed) return;
 	try {
-		const result = await postJson("/save", { token: sessionToken, selections });
-		if (result.ok) showSaveToast(`Saved to ${result.relativePath}`);
+		const payload = { token: sessionToken, selections, notes: buildSelectedNotes() };
+		if (finalNotes) payload.finalNotes = finalNotes;
+		const result = await postJson("/save", payload);
+		if (result.ok) {
+			markSaved(new Date().toISOString());
+			showSaveToast(`Saved to ${result.relativePath}`);
+		}
 		else showSaveToast(result.error || "Save failed", true);
 	} catch {
 		showSaveToast("Save failed", true);
@@ -71,6 +86,7 @@ function stopHeartbeat() {
 function disableDeckInteractions() {
 	if (btnBack) btnBack.disabled = true;
 	if (btnNext) btnNext.disabled = true;
+	if (btnSave) btnSave.disabled = true;
 	document.querySelectorAll(".btn-gen-more, .btn-regen").forEach((button) => {
 		button.disabled = true;
 	});
@@ -98,13 +114,7 @@ async function submitDeck() {
 	}
 
 	try {
-		// Build notes object with only notes for selected options
-		const notes = {};
-		for (const [slideId, noteData] of Object.entries(optionNotes)) {
-			if (noteData && selections[slideId] === noteData.label && noteData.notes) {
-				notes[slideId] = noteData.notes;
-			}
-		}
+		const notes = buildSelectedNotes();
 		const payload = { token: sessionToken, selections, notes };
 		if (finalNotes) payload.finalNotes = finalNotes;
 		await postJson("/submit", payload);
@@ -307,6 +317,7 @@ function insertGeneratedOption(slideId, option, model) {
 	if (current === totalSlides - 1) {
 		updateSummary();
 	}
+	markDirty();
 }
 
 function replaceSlideOptions(slideId, newOptions) {
@@ -355,6 +366,7 @@ function replaceSlideOptions(slideId, newOptions) {
 	if (current === totalSlides - 1) {
 		updateSummary();
 	}
+	markDirty();
 }
 
 function connectEvents() {
@@ -636,6 +648,9 @@ function initSaveShortcut() {
 	document.querySelectorAll(".mod-key").forEach((el) => {
 		el.textContent = isMac ? "⌘" : "Ctrl";
 	});
+	if (btnSave) {
+		btnSave.addEventListener("click", () => saveDeck());
+	}
 	document.addEventListener("keydown", (e) => {
 		const mod = isMac ? e.metaKey : e.ctrlKey;
 		if (mod && e.key === "s") {
@@ -667,6 +682,7 @@ function init() {
 	fetchModels().then((data) => {
 		if (data) initModelBar(data);
 	});
+	updateSaveStatus();
 
 	document.addEventListener("keydown", handleKeydown);
 	window.addEventListener("beforeunload", sendCancelBeacon);

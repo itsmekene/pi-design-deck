@@ -1,6 +1,33 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-03-02
+
+### Added
+- **`add-options` action**: New batched action that pushes multiple options in one call and blocks for next user action. Replaces multiple `add-option` calls for generate-more requests. More elegant — single call, automatic blocking, no agent coordination needed.
+- **Deck persistence actions**: `list` to enumerate saved decks, `open` to reopen by deck ID, and `export` to generate standalone HTML from a saved snapshot.
+- **Saved deck metadata**: Snapshots now persist `id`, `status`, `modifiedAt`, selected-option notes, and final instructions for reopen/export flows.
+- **Standalone HTML export**: Saved decks can be written to `export.html` for read-only review without the live server.
+- **Component Gallery Reference**: Added `skills/design-deck/references/component-gallery/` with 60 UI component patterns
+  - Enables discovery (find/suggest components for a use case), cross-referencing (collapse = accordion = disclosure), and design vocabulary (Blueprint = dense, dark-native)
+  - `components.md` with best practices, common layouts, and aliases for every major component
+  - `INDEX.md` with design system vocabulary table and context-aware guidance (distinct systems vs variations)
+- **Modular design system examples**: `components/` subdirectory with 2,676 real-world implementations scraped from component.gallery
+  - 8 category files: actions, navigation, inputs, data-display, feedback, overlays, layout, utilities
+  - Each entry includes design system name, direct documentation URL, tech stack, features, and preview image link
+  - Organized by design system within each component for easy comparison (Ant Design vs Blueprint vs Carbon, etc.)
+- **Vocabulary Lookup**: `LOOKUP.md` resolves ambiguous user terms to canonical component names
+  - Alias index with 150+ term mappings (collapse → Accordion, snackbar → Toast, etc.)
+  - Disambiguation rules for ambiguous terms (dropdown, popup, loading, notification, menu, sidebar, list, panel, chip, picker)
+  - Intent clusters for goal-based mapping ("I need users to pick from options" → Radio, Select, Combobox)
+  - Clarification templates for when disambiguation needs user input
+  - Platform-specific term translations (iOS action sheet → Drawer, Material snackbar → Toast)
+  - Common confusion reference (Select vs Combobox, Modal vs Drawer, Alert vs Toast, etc.)
+- Updated SKILL.md, deck prompts, and README to reference component gallery
+- Credit to [component.gallery](https://component.gallery) by Iain Bean
+
+### Changed
+- **Manual save payload**: `Cmd+S` / Save button now persists selected-option notes and final instructions, not just selections.
+- **Saved deck restoration**: Opening a saved deck now restores notes and final instructions from disk instead of depending on localStorage.
 
 ## [0.2.0] - 2026-02-27
 

@@ -66,6 +66,10 @@ const ABANDONED_GRACE_MS = 60000;
 const WATCHDOG_INTERVAL_MS = 5000;
 const GENERATE_TIMEOUT_MS = 90_000;
 
+export function getDefaultSnapshotDir(): string {
+	return join(homedir(), ".pi", "deck-snapshots");
+}
+
 function toStringMap(value: unknown): Record<string, string> | null {
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
 		return null;
@@ -100,7 +104,7 @@ function processOptionAssets(option: DeckOption, assetsDir: string): DeckOption 
 	return { ...option, previewBlocks: processImageBlocks(option.previewBlocks, assetsDir) };
 }
 
-const DECK_SNAPSHOTS_DIR = join(homedir(), ".pi", "deck-snapshots");
+const DECK_SNAPSHOTS_DIR = getDefaultSnapshotDir();
 
 function sanitizeForFilename(value: string): string {
 	return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40).replace(/_+$/, "") || "unknown";
@@ -114,17 +118,30 @@ function saveDeckSnapshot(
 	gitBranch: string | null,
 	sessionId: string,
 	baseDir: string,
-	suffix?: string
+	options?: {
+		status?: "submitted" | "in-progress" | "cancelled";
+		notes?: Record<string, string>;
+		finalNotes?: string;
+	}
 ): { path: string; relativePath: string } {
 	const now = new Date();
+	const nowIso = now.toISOString();
 	const date = now.toISOString().slice(0, 10);
 	const time = now.toTimeString().slice(0, 8).replace(/:/g, "");
 	const titleSlug = sanitizeForFilename(config.title || "deck");
 	const project = sanitizeForFilename(basename(normalizedCwd) || "unknown");
 	const branch = sanitizeForFilename(gitBranch || "nogit");
+	const suffix = options?.status === "submitted" || options?.status === "cancelled" ? options.status : undefined;
 	const safeSuffix = suffix ? `-${suffix}` : "";
-	const folderName = `${titleSlug}-${project}-${branch}-${date}-${time}${safeSuffix}`;
-	const snapshotPath = join(baseDir, folderName);
+	const baseFolderName = `${titleSlug}-${project}-${branch}-${date}-${time}${safeSuffix}`;
+	let folderName = baseFolderName;
+	let snapshotPath = join(baseDir, folderName);
+	let collisionIndex = 2;
+	while (existsSync(snapshotPath)) {
+		folderName = `${baseFolderName}-${collisionIndex}`;
+		snapshotPath = join(baseDir, folderName);
+		collisionIndex += 1;
+	}
 	const imagesPath = join(snapshotPath, "images");
 
 	mkdirSync(snapshotPath, { recursive: true });
@@ -149,7 +166,12 @@ function saveDeckSnapshot(
 	const data = {
 		config: saved,
 		selections,
-		savedAt: now.toISOString(),
+		savedAt: nowIso,
+		id: folderName,
+		status: options?.status,
+		modifiedAt: nowIso,
+		notes: options?.notes && Object.keys(options.notes).length > 0 ? options.notes : undefined,
+		finalNotes: options?.finalNotes ? options.finalNotes : undefined,
 		savedFrom: { cwd: normalizedCwd, branch: gitBranch, sessionId },
 	};
 	writeFileSync(join(snapshotPath, "deck.json"), JSON.stringify(data, null, 2));
@@ -167,6 +189,8 @@ export interface DeckServerOptions {
 	port?: number;
 	theme?: { mode?: string; toggleHotkey?: string };
 	savedSelections?: Record<string, string>;
+	savedNotes?: Record<string, { label: string; notes: string }>;
+	savedFinalNotes?: string;
 	snapshotDir?: string;
 	autoSaveOnSubmit?: boolean;
 	models?: ModelsPayload;
@@ -192,7 +216,19 @@ export async function startDeckServer(
 	options: DeckServerOptions,
 	callbacks: DeckServerCallbacks
 ): Promise<DeckServerHandle> {
-	const { config, sessionToken, sessionId, cwd, port, theme, savedSelections, snapshotDir, autoSaveOnSubmit } = options;
+	const {
+		config,
+		sessionToken,
+		sessionId,
+		cwd,
+		port,
+		theme,
+		savedSelections,
+		savedNotes,
+		savedFinalNotes,
+		snapshotDir,
+		autoSaveOnSubmit,
+	} = options;
 	const normalizedCwd = normalizePath(cwd);
 	const gitBranch = getGitBranch(cwd);
 
@@ -293,6 +329,8 @@ export async function startDeckServer(
 					gitBranch,
 					theme,
 					savedSelections,
+					savedNotes,
+					savedFinalNotes,
 				});
 				const title = config.title ? `${config.title} — Design Deck` : "Design Deck";
 				const html = DECK_TEMPLATE
@@ -426,7 +464,11 @@ export async function startDeckServer(
 				touchHeartbeat();
 				if (autoSaveOnSubmit !== false) {
 					try {
-						saveDeckSnapshot(config, selections, assetsDir, normalizedCwd, gitBranch, sessionId, snapshotDir || DECK_SNAPSHOTS_DIR, "submitted");
+						saveDeckSnapshot(config, selections, assetsDir, normalizedCwd, gitBranch, sessionId, snapshotDir || DECK_SNAPSHOTS_DIR, {
+							status: "submitted",
+							notes,
+							finalNotes: finalNotes || undefined,
+						});
 					} catch {}
 				}
 				markCompleted();
@@ -441,12 +483,22 @@ export async function startDeckServer(
 				const body = await safeParseBody(req, res);
 				if (!body) return;
 				if (!validateTokenBody(body, sessionToken, res)) return;
+				if (completed) {
+					sendJson(res, 409, { ok: false, error: "Session closed" });
+					return;
+				}
 
-				const payload = body as { selections?: unknown };
+				const payload = body as { selections?: unknown; notes?: unknown; finalNotes?: unknown };
 				const selections = toStringMap(payload.selections) ?? {};
+				const notes = toStringMap(payload.notes) ?? undefined;
+				const finalNotes = typeof payload.finalNotes === "string" ? payload.finalNotes.trim() : undefined;
 
 				try {
-					const result = saveDeckSnapshot(config, selections, assetsDir, normalizedCwd, gitBranch, sessionId, snapshotDir || DECK_SNAPSHOTS_DIR);
+					const result = saveDeckSnapshot(config, selections, assetsDir, normalizedCwd, gitBranch, sessionId, snapshotDir || DECK_SNAPSHOTS_DIR, {
+						status: "in-progress",
+						notes,
+						finalNotes: finalNotes || undefined,
+					});
 					sendJson(res, 200, { ok: true, path: result.path, relativePath: result.relativePath });
 				} catch (err) {
 					const message = err instanceof Error ? err.message : "Save failed";
@@ -473,7 +525,9 @@ export async function startDeckServer(
 				const cancelSelections = toStringMap(payload.selections);
 				if (cancelSelections && Object.keys(cancelSelections).length > 0) {
 					try {
-						saveDeckSnapshot(config, cancelSelections, assetsDir, normalizedCwd, gitBranch, sessionId, snapshotDir || DECK_SNAPSHOTS_DIR, "cancelled");
+						saveDeckSnapshot(config, cancelSelections, assetsDir, normalizedCwd, gitBranch, sessionId, snapshotDir || DECK_SNAPSHOTS_DIR, {
+							status: "cancelled",
+						});
 					} catch {}
 				}
 

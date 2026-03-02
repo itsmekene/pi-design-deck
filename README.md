@@ -99,7 +99,9 @@ The browser opens, the user picks "JWT + Refresh Tokens", and the agent receives
 - **Slide columns**: `columns` property (1, 2, or 3) per slide. Auto-detected from option count if omitted.
 - **Smart rebalancing**: Grid layout recalculates after generate-more adds options to minimize orphans.
 - **Option aside**: Explanatory text rendered below the preview. Supports `\n` for line breaks.
-- **Save/load snapshots**: `Cmd+S` saves the deck to disk. Pass a file path to `slides` to reload a saved deck with selections pre-populated.
+- **Save/load snapshots**: `Cmd+S` saves the deck to disk. Use `action: "list"` to enumerate saved decks, `action: "open"` to reopen one by deck ID, or pass a file path to `slides`.
+- **Notes persistence**: Saved decks include selected-option notes and summary-slide final instructions, and reopening restores both from disk.
+- **Standalone HTML export**: `action: "export"` writes a read-only `export.html` next to the saved deck snapshot.
 - **Light/dark/auto theme**: Full theme toggle with `Cmd+Shift+L` (configurable). Persists in localStorage.
 - **Heartbeat watchdog**: Server detects lost browser connections (60s grace) and cleans up.
 - **Idle timeout**: 5-minute inactivity timer after generate-more. Closes the deck if the agent doesn't respond.
@@ -110,7 +112,7 @@ The browser opens, the user picks "JWT + Refresh Tokens", and the agent receives
 
 1. Agent calls `design_deck()` with slides JSON — local HTTP server starts, browser opens
 2. User navigates slides, picks one option per slide
-3. Optionally clicks "Generate another option" — agent generates and pushes via `add-option`, deck stays open
+3. Optionally clicks "Generate N options" — agent generates and pushes via `add-options`, deck stays open
 4. User submits — selections returned to agent as `{ slideId: "selected label" }`
 
 The server persists across tool re-invocations. When generate-more fires, the tool resolves with instructions for the agent to create a new option. The browser shows a skeleton placeholder with shimmer animation until the new option arrives via SSE.
@@ -166,17 +168,17 @@ The slide ID `"summary"` is reserved for the built-in summary slide that appears
 
 ## Generate-More Loop
 
-When the user clicks "Generate another option," the tool resolves with a structured prompt telling the agent which slide needs a new option, what options already exist, and what format to use. The agent generates one new option and pushes it:
+When the user clicks "Generate N options," the tool resolves with a structured prompt telling the agent which slide needs options, how many, what options already exist, and what format to use. The agent generates the requested options and pushes them all at once:
 
 ```typescript
 design_deck({
-  action: "add-option",
+  action: "add-options",
   slideId: "arch",
-  option: '{"label": "Serverless", "previewBlocks": [{"type": "code", "code": "...", "lang": "ts"}]}'
+  options: '[{"label": "Serverless", "previewBlocks": [...]}, {"label": "Edge", "previewBlocks": [...]}]'
 })
 ```
 
-The browser shows the new option with an entry animation. The tool blocks again, waiting for the next user action (submit, cancel, or another generate-more).
+The browser shows the new options with entry animations. The `add-options` call blocks until the next user action (submit, cancel, or another generate-more).
 
 ### Model Override
 
@@ -212,6 +214,21 @@ design_deck({ slides: "~/.pi/deck-snapshots/api-design-myapp-main-2026-02-22-143
 ```
 
 The deck opens with selections pre-populated and image paths resolved relative to the snapshot directory.
+
+**Listing saved decks:**
+```typescript
+design_deck({ action: "list" })
+```
+
+**Opening by deck ID:**
+```typescript
+design_deck({ action: "open", deckId: "api-design-myapp-main-2026-02-22-143000-submitted" })
+```
+
+**Exporting standalone HTML:**
+```typescript
+design_deck({ action: "export", deckId: "api-design-myapp-main-2026-02-22-143000-submitted", format: "html" })
+```
 
 **Snapshot structure:**
 ```
@@ -272,15 +289,20 @@ The agent handles these when you use the slash commands or ask in natural langua
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `slides` | string | JSON string of deck config, or file path to a saved deck |
-| `action` | `"add-option"` \| `"replace-options"` | Push or replace options in a running deck |
+| `action` | `"add-options"` \| `"add-option"` \| `"replace-options"` \| `"list"` \| `"open"` \| `"export"` | Push/replace options, list saved decks, reopen a saved deck, or export one |
 | `slideId` | string | Target slide ID (required with actions) |
 | `option` | string | JSON string of one option (required with `add-option`) |
-| `options` | string | JSON string of option array (required with `replace-options`) |
+| `options` | string | JSON string of option array (required with `add-options` or `replace-options`) |
+| `deckId` | string | Saved deck ID from `action: "list"` (required with `open` / `export`) |
+| `format` | string | Export format for `action: "export"` (`"html"` currently supported) |
 
-Three modes of invocation:
+Six modes of invocation:
 1. **Start a new deck:** `design_deck({ slides: "<JSON>" })`
-2. **Add option to running deck:** `design_deck({ action: "add-option", slideId: "...", option: "<JSON>" })`
-3. **Replace all options on a slide:** `design_deck({ action: "replace-options", slideId: "...", options: "<JSON array>" })`
+2. **Add options to running deck:** `design_deck({ action: "add-options", slideId: "...", options: "<JSON array>" })` — blocks until next user action
+3. **Add single option (non-blocking):** `design_deck({ action: "add-option", slideId: "...", option: "<JSON>" })`
+4. **Replace all options on a slide:** `design_deck({ action: "replace-options", slideId: "...", options: "<JSON array>" })`
+5. **List saved decks:** `design_deck({ action: "list" })`
+6. **Open or export a saved deck:** `design_deck({ action: "open" | "export", deckId: "..." })`
 
 ## File Structure
 
@@ -313,6 +335,18 @@ The extension includes a `design-deck` skill at `skills/design-deck/SKILL.md` th
 
 The skill is declared in `package.json` under `pi.skills` and is automatically discovered when the extension is installed. No manual copying needed.
 
+### Component Gallery Reference
+
+The skill includes a reference library for 60 UI components with best practices, common layouts, and aliases. Each component links to [component.gallery](https://component.gallery) where the agent can browse real screenshots when needed.
+
+**Before:** "Show me collapse options" → agent might not connect that to accordion, or know what components are available for the use case.
+
+**After:** Agent has 60 components to suggest from. Knows *collapse = accordion = disclosure = expander*. Knows *Blueprint = dense, dark-native; Ant = clean, blue primary.* Can browse [100+ real implementations](https://component.gallery/components/accordion/) when it needs concrete references.
+
+The reference enables discovery (find/suggest components), cross-referencing (connect related terms), and design vocabulary (know what systems look like) — plus guidance on *when* to show distinct design systems vs variations of one style.
+
+A separate vocabulary lookup (`LOOKUP.md`) resolves ambiguous user terms to canonical components. When a user says "dropdown" (Select? Combobox? Dropdown menu?) or "popup" (Modal? Popover? Tooltip?) or describes intent ("I need something that expands"), the agent can consult the lookup to understand what they mean and ask the right clarifying questions when needed.
+
 ## Limitations
 
 - Only one deck can be active at a time. Complete or cancel before starting another.
@@ -320,3 +354,7 @@ The skill is declared in `package.json` under `pi.skills` and is automatically d
 - The `summary` slide ID is reserved and cannot be used for custom slides.
 - Mermaid diagrams load from CDN — requires internet on first load.
 - macOS tested primarily; Linux and Windows support is best-effort.
+
+## Credits
+
+UI component reference data sourced from [component.gallery](https://component.gallery) by Iain Bean.

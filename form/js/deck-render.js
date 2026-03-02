@@ -222,6 +222,7 @@ function createOptionCard(option, slideId, generatedBy) {
 			delete optionNotes[slideId];
 		}
 		saveSelectionsToStorage();
+		markDirty();
 	});
 	
 	// Prevent click from bubbling to card (which would select it)
@@ -375,6 +376,7 @@ function createSummarySlide(index) {
 	finalNotesInput.addEventListener("input", (e) => {
 		finalNotes = e.target.value.trim();
 		saveSelectionsToStorage();
+		markDirty();
 	});
 	finalNotesContainer.appendChild(finalNotesLabel);
 	finalNotesContainer.appendChild(finalNotesInput);

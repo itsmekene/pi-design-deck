@@ -2,16 +2,21 @@
 
 function applySavedSelections(savedSelections, savedNotes) {
 	if (!savedSelections || typeof savedSelections !== "object") return;
-	for (const [slideId, label] of Object.entries(savedSelections)) {
-		if (typeof label !== "string") continue;
-		const slideEl = document.querySelector(`.slide[data-id="${CSS.escape(slideId)}"]`);
-		if (!slideEl) continue;
-		for (const card of slideEl.querySelectorAll(".option")) {
-			if (card.dataset.value === label) {
-				selectOption(card);
-				break;
+	isRestoringSelections = true;
+	try {
+		for (const [slideId, label] of Object.entries(savedSelections)) {
+			if (typeof label !== "string") continue;
+			const slideEl = document.querySelector(`.slide[data-id="${CSS.escape(slideId)}"]`);
+			if (!slideEl) continue;
+			for (const card of slideEl.querySelectorAll(".option")) {
+				if (card.dataset.value === label) {
+					selectOption(card);
+					break;
+				}
 			}
 		}
+	} finally {
+		isRestoringSelections = false;
 	}
 	// Restore notes
 	if (savedNotes && typeof savedNotes === "object") {
@@ -28,8 +33,16 @@ function applySavedSelections(savedSelections, savedNotes) {
 
 function restoreSelections() {
 	const serverSaved = deckData.savedSelections;
-	if (serverSaved && typeof serverSaved === "object" && Object.keys(serverSaved).length > 0) {
-		applySavedSelections(serverSaved, null);
+	const hasServerSavedSelections = serverSaved && typeof serverSaved === "object" && Object.keys(serverSaved).length > 0;
+	const hasServerSavedNotes = deckData.savedNotes && typeof deckData.savedNotes === "object" && Object.keys(deckData.savedNotes).length > 0;
+	const hasServerFinalNotes = typeof deckData.savedFinalNotes === "string" && deckData.savedFinalNotes.trim() !== "";
+	if (hasServerSavedSelections || hasServerSavedNotes || hasServerFinalNotes) {
+		applySavedSelections(hasServerSavedSelections ? serverSaved : null, deckData.savedNotes || null);
+		if (deckData.savedFinalNotes) {
+			finalNotes = deckData.savedFinalNotes;
+			const input = document.getElementById("final-notes-input");
+			if (input) input.value = deckData.savedFinalNotes;
+		}
 		return;
 	}
 	const stored = loadSelectionsFromStorage();
@@ -59,10 +72,15 @@ function selectOption(optionElement) {
 	if (!slideElement) return;
 	const slideId = slideElement.dataset.id;
 	if (!slideId || slideId === "summary") return;
+	const nextValue = optionElement.dataset.value || "";
+	if (selections[slideId] === nextValue) return;
 
 	applySelectionClasses(slideElement, optionElement);
-	selections[slideId] = optionElement.dataset.value || "";
-	saveSelectionsToStorage();
+	selections[slideId] = nextValue;
+	if (!isRestoringSelections) {
+		saveSelectionsToStorage();
+		markDirty();
+	}
 }
 
 // ─── NAVIGATION ──────────────────────────────────────────────

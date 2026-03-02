@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateDeckConfig, isDeckOption, validateSavedDeck } from "./deck-schema.js";
+import { validateDeckConfig, isDeckOption, validateSavedDeck, deriveDeckStatusFromFolderName } from "./deck-schema.js";
 
 function validDeck(slideOverrides: Record<string, unknown> = {}, optionOverrides: Record<string, unknown> = {}) {
 	return {
@@ -415,5 +415,23 @@ describe("validateSavedDeck", () => {
 	it("rejects invalid config", () => {
 		expect(() => validateSavedDeck({ config: "bad" })).toThrow();
 		expect(() => validateSavedDeck({ config: { slides: [] } })).toThrow("non-empty array");
+	});
+});
+
+describe("deriveDeckStatusFromFolderName", () => {
+	it("returns 'submitted' for folders ending with -submitted", () => {
+		expect(deriveDeckStatusFromFolderName("tabs-myapp-main-2026-03-01-103045-submitted")).toBe("submitted");
+	});
+
+	it("returns 'cancelled' for folders ending with -cancelled", () => {
+		expect(deriveDeckStatusFromFolderName("tabs-myapp-main-2026-03-01-103045-cancelled")).toBe("cancelled");
+	});
+
+	it("returns 'in-progress' for folders without status suffix", () => {
+		expect(deriveDeckStatusFromFolderName("tabs-myapp-main-2026-03-01-103045")).toBe("in-progress");
+	});
+
+	it("returns 'in-progress' for random folder names", () => {
+		expect(deriveDeckStatusFromFolderName("my-deck")).toBe("in-progress");
 	});
 });

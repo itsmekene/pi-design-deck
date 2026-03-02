@@ -28,8 +28,8 @@ function optionTemplate(hasBlocks: boolean): string {
 
 function modelHints(generateModel?: string, thinking?: string, action?: string): string {
 	if (!generateModel) return "";
-	const verb = action === "replace-options" ? "replace-options" : "add-option";
-	let hint = `\nGenerate ${verb === "replace-options" ? "options " : ""}using deck_generate({ model: "${generateModel}", task: "..." }), then push with ${verb}.`;
+	const verb = action === "replace-options" ? "replace-options" : "add-options";
+	let hint = `\nGenerate options using deck_generate({ model: "${generateModel}", task: "..." }), then push with ${verb}.`;
 	if (thinking && thinking !== "off") {
 		hint += `\nUse thinking level: "${thinking}".`;
 	}
@@ -56,20 +56,18 @@ export function buildGenerateMoreResult(slideId: string, slide: DeckSlide | unde
 	const userInstructions = prompt ? `\nUser instructions: "${prompt}"` : "";
 	
 	const optionWord = count === 1 ? "option" : "options";
-	const callInstructions = count === 1
-		? `YOU MUST generate one distinctive additional option and call design_deck with add-option.`
-		: `YOU MUST generate ${count} distinctive additional options. Call design_deck with add-option ${count} times (once per option).`;
 
 	return (
 		"The design deck is still open and waiting for your response.\n\n" +
 		`User clicked "Generate ${count} ${optionWord}" for slide \"${title}\".${context}${userInstructions}\n\n` +
 		`Existing options:\n${existingText}\n\n` +
-		`${callInstructions} ` +
-		`Do not skip this step or decide the user has enough options — they explicitly requested ${count === 1 ? "another one" : `${count} more`}.${modelHints(generateModel, thinking, "add-option")}\n\n` +
-		`design_deck({\"action\":\"add-option\",\"slideId\":\"${slideId}\",\"option\":${JSON.stringify(template)}})\n\n` +
-		`The option field must be a JSON string with: label, optional description, optional aside (explanatory notes below preview), and optional recommended.\n` +
+		`YOU MUST generate ${count} distinctive additional ${optionWord} and call design_deck with add-options (one call with all options in an array). ` +
+		`Do not skip this step or decide the user has enough options — they explicitly requested ${count === 1 ? "another one" : `${count} more`}.${modelHints(generateModel, thinking, "add-options")}\n\n` +
+		`design_deck({\"action\":\"add-options\",\"slideId\":\"${slideId}\",\"options\":\"[${template}${count > 1 ? ", ..." : ""}]\"})` +
+		`\n\nThe options field must be a JSON string containing an array of ${count} option object${count > 1 ? "s" : ""}.\n` +
+		`Each option needs: label, optional description, optional aside (explanatory notes below preview), optional recommended, and either previewHtml or previewBlocks.\n` +
 		`${formatHint}` +
-		(count > 1 ? `\n\nRemember: Call add-option ${count} times, each with a different option. Make each option distinctive.` : "")
+		(count > 1 ? `\n\nMake each option distinctive — they should represent genuinely different approaches.` : "")
 	);
 }
 

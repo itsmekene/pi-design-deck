@@ -6,10 +6,11 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { loadSettings } from "./settings.js";
-import { startDeckServer, type DeckServerHandle, type ModelInfo } from "./deck-server.js";
-import { isDeckOption, validateDeckConfig, validateSavedDeck } from "./deck-schema.js";
+import { getDefaultSnapshotDir, startDeckServer, type DeckServerHandle, type ModelInfo } from "./deck-server.js";
+import { deriveDeckStatusFromFolderName, isDeckOption, validateDeckConfig, validateSavedDeck, type SavedDeckData, type SavedDeckStatus } from "./deck-schema.js";
 import { buildGenerateMoreResult, buildRegenerateResult } from "./generate-prompts.js";
 import { generateWithModel } from "./model-runner.js";
+import { buildStandaloneDeckHtml } from "./export-html.js";
 
 async function openUrl(pi: ExtensionAPI, url: string, browser?: string): Promise<void> {
 	const platform = os.platform();
@@ -64,6 +65,24 @@ let restoreDeckThinking: (() => void) | null = null;
 
 const DECK_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
+interface SavedDeckListItem {
+	id: string;
+	title: string;
+	savedAt: string;
+	modifiedAt: string;
+	status: SavedDeckStatus;
+	cwd?: string;
+	branch?: string | null;
+	slideCount: number;
+}
+
+interface LoadedDeckSource {
+	configData: unknown;
+	savedSelections?: Record<string, string>;
+	savedNotes?: Record<string, { label: string; notes: string }>;
+	savedFinalNotes?: string;
+}
+
 const DeckParams = Type.Object(
 	{
 		slides: Type.Optional(
@@ -78,11 +97,15 @@ const DeckParams = Type.Object(
 		action: Type.Optional(
 			Type.Union([
 				Type.Literal("add-option", { description: "Push a single generated option into a running deck session" }),
+				Type.Literal("add-options", { description: "Push multiple generated options into a running deck session (blocks until next user action)" }),
 				Type.Literal("replace-options", { description: "Replace all options for a slide with fresh alternatives" }),
+				Type.Literal("list", { description: "List saved decks from the snapshot directory" }),
+				Type.Literal("open", { description: "Open a saved deck by deck ID" }),
+				Type.Literal("export", { description: "Export a saved deck as standalone HTML" }),
 			])
 		),
 		slideId: Type.Optional(
-			Type.String({ description: "Target slide ID (required with action: 'add-option' or 'replace-options')" })
+			Type.String({ description: "Target slide ID (required with action: 'add-option', 'add-options', or 'replace-options')" })
 		),
 		option: Type.Optional(
 			Type.String({
@@ -93,8 +116,14 @@ const DeckParams = Type.Object(
 		options: Type.Optional(
 			Type.String({
 				description:
-					"JSON string of array of deck options (required with action: 'replace-options')",
+					"JSON string of array of deck options (required with action: 'add-options' or 'replace-options')",
 			})
+		),
+		deckId: Type.Optional(
+			Type.String({ description: "Deck ID for open/export actions (folder name from list)" })
+		),
+		format: Type.Optional(
+			Type.String({ description: "Export format: 'html' (default)" })
 		),
 	},
 	{ additionalProperties: false }
@@ -109,6 +138,104 @@ function expandHome(value: string): string {
 		return path.join(os.homedir(), value.slice(2));
 	}
 	return value;
+}
+
+function resolveSnapshotDir(snapshotDir?: string): string {
+	return snapshotDir ? expandHome(snapshotDir) : getDefaultSnapshotDir();
+}
+
+function listSavedDecks(snapshotDir: string): { decks: SavedDeckListItem[]; warnings: string[] } {
+	if (!fs.existsSync(snapshotDir)) {
+		return { decks: [], warnings: [] };
+	}
+
+	const entries = fs.readdirSync(snapshotDir, { withFileTypes: true });
+	const decks: SavedDeckListItem[] = [];
+	const warnings: string[] = [];
+
+	for (const entry of entries) {
+		if (!entry.isDirectory()) continue;
+		const deckJsonPath = path.join(snapshotDir, entry.name, "deck.json");
+		if (!fs.existsSync(deckJsonPath)) continue;
+
+		try {
+			const raw = JSON.parse(fs.readFileSync(deckJsonPath, "utf-8"));
+			const saved = validateSavedDeck(raw);
+			decks.push({
+				id: saved.id ?? entry.name,
+				title: saved.config.title || "Design Deck",
+				savedAt: saved.savedAt,
+				modifiedAt: saved.modifiedAt ?? saved.savedAt,
+				status: saved.status ?? deriveDeckStatusFromFolderName(entry.name),
+				cwd: saved.savedFrom?.cwd,
+				branch: saved.savedFrom?.branch,
+				slideCount: saved.config.slides.length,
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			warnings.push(`${entry.name}: ${message}`);
+		}
+	}
+
+	return { decks, warnings };
+}
+
+function resolveDeckFilePath(snapshotDir: string, deckId: string): string | null {
+	if (!deckId || deckId === "." || deckId === ".." || deckId.includes("/") || deckId.includes("\\")) {
+		return null;
+	}
+	const root = path.resolve(snapshotDir);
+	const deckDir = path.resolve(snapshotDir, deckId);
+	if (deckDir !== root && !deckDir.startsWith(root + path.sep)) {
+		return null;
+	}
+	return path.join(deckDir, "deck.json");
+}
+
+function buildSavedNotesForClient(saved: SavedDeckData): Record<string, { label: string; notes: string }> | undefined {
+	const savedNotesForClient: Record<string, { label: string; notes: string }> = {};
+	for (const [slideId, noteString] of Object.entries(saved.notes ?? {})) {
+		const label = saved.selections[slideId];
+		if (label && noteString) {
+			savedNotesForClient[slideId] = { label, notes: noteString };
+		}
+	}
+	return Object.keys(savedNotesForClient).length > 0 ? savedNotesForClient : undefined;
+}
+
+function loadDeckFile(absolutePath: string): LoadedDeckSource {
+	const content = fs.readFileSync(absolutePath, "utf-8");
+	let fileData: unknown;
+	try {
+		fileData = JSON.parse(content);
+	} catch (parseErr) {
+		const message = parseErr instanceof Error ? parseErr.message : String(parseErr);
+		throw new Error(`Invalid JSON in saved deck file: ${message}`);
+	}
+
+	const raw = fileData as Record<string, unknown>;
+	if (raw.config && typeof raw.config === "object") {
+		const saved = validateSavedDeck(fileData);
+		const snapshotDir = path.dirname(absolutePath);
+		for (const slide of saved.config.slides) {
+			for (const option of slide.options) {
+				if (!option.previewBlocks) continue;
+				for (const block of option.previewBlocks) {
+					if (block.type === "image" && !path.isAbsolute(block.src)) {
+						block.src = path.join(snapshotDir, block.src);
+					}
+				}
+			}
+		}
+		return {
+			configData: saved.config,
+			savedSelections: Object.keys(saved.selections).length > 0 ? saved.selections : undefined,
+			savedNotes: buildSavedNotesForClient(saved),
+			savedFinalNotes: saved.finalNotes,
+		};
+	}
+
+	return { configData: fileData };
 }
 
 const DEFAULT_THEME_HOTKEY = "mod+shift+l";
@@ -207,19 +334,32 @@ export default function (pi: ExtensionAPI) {
 			"Present a multi-slide design deck with visual options for decisions. " +
 			"Slides JSON: { title?, slides: [{ id, title, context?, columns?, options }] }. " +
 			"When the user requests more options, tool returns generate-more instructions — " +
-			'call design_deck with action:"add-option" to push into the live deck. ' +
+			'call design_deck with action:"add-options" to push all new options at once. ' +
 			"previewBlocks for code/architecture comparisons, previewHtml for custom UI mockups.",
 		parameters: DeckParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			if (!ctx.hasUI) {
+			const p = params as Record<string, unknown>;
+
+			if (!ctx.hasUI && p.action !== "list" && p.action !== "export") {
 				throw new Error(
 					"design_deck requires interactive mode with browser support. " +
 						"Cannot run in headless/RPC/print mode."
 				);
 			}
 
-			const p = params as Record<string, unknown>;
+			if (p.action === "list") {
+				const settings = loadSettings();
+				const snapshotDir = resolveSnapshotDir(settings.snapshotDir);
+				const { decks, warnings } = listSavedDecks(snapshotDir);
+				const content: Array<{ type: "text"; text: string }> = [
+					{ type: "text", text: JSON.stringify(decks, null, 2) },
+				];
+				if (warnings.length > 0) {
+					content.push({ type: "text", text: `Warnings:\n${warnings.map((w) => `- ${w}`).join("\n")}` });
+				}
+				return { content };
+			}
 
 			if (p.action === "add-option") {
 				if (typeof p.slideId !== "string" || p.slideId.trim() === "") {
@@ -233,6 +373,21 @@ export default function (pi: ExtensionAPI) {
 					activeDeckServer?.handle.cancelGenerate();
 					return {
 						content: [{ type: "text", text: 'add-option requires option (JSON string with label and either previewHtml or previewBlocks).' }],
+						details: { status: "error", url: activeDeckServer?.handle.url ?? "" },
+					};
+				}
+			} else if (p.action === "add-options") {
+				if (typeof p.slideId !== "string" || p.slideId.trim() === "") {
+					activeDeckServer?.handle.cancelGenerate();
+					return {
+						content: [{ type: "text", text: 'add-options requires slideId (string).' }],
+						details: { status: "error", url: activeDeckServer?.handle.url ?? "" },
+					};
+				}
+				if (typeof p.options !== "string" || p.options.trim() === "") {
+					activeDeckServer?.handle.cancelGenerate();
+					return {
+						content: [{ type: "text", text: 'add-options requires options (JSON array string).' }],
 						details: { status: "error", url: activeDeckServer?.handle.url ?? "" },
 					};
 				}
@@ -251,6 +406,13 @@ export default function (pi: ExtensionAPI) {
 						details: { status: "error", url: activeDeckServer?.handle.url ?? "" },
 					};
 				}
+			} else if (p.action === "open" || p.action === "export") {
+				if (typeof p.deckId !== "string" || p.deckId.trim() === "") {
+					return {
+						content: [{ type: "text", text: `${p.action} requires deckId (string). Example: { action: "${p.action}", deckId: "tabs-component-myapp-main-2026-03-01-103045-submitted" }` }],
+						details: { status: "error", url: activeDeckServer?.handle.url ?? "" },
+					};
+				}
 			} else if (typeof p.slides !== "string" || p.slides.trim() === "") {
 				return {
 					content: [{
@@ -258,7 +420,10 @@ export default function (pi: ExtensionAPI) {
 						text:
 							"design_deck requires one of:\n\n" +
 							'1. Start a new deck: { slides: "<JSON string of { title?, slides: [{ id, title, options }] }>" }\n' +
-							'2. Add option to running deck: { action: "add-option", slideId: "...", option: "<JSON string>" }\n\n' +
+							'2. Open a saved deck: { action: "open", deckId: "..." }\n' +
+							'3. Export a saved deck: { action: "export", deckId: "...", format: "html" }\n' +
+							'4. Add options to running deck: { action: "add-options", slideId: "...", options: "[<JSON array>]" }\n' +
+							'5. Add single option: { action: "add-option", slideId: "...", option: "<JSON string>" }\n\n' +
 							"Each option needs label + either previewHtml (raw HTML) or previewBlocks (array of {type, ...} blocks).\n" +
 							"Block types: html, mermaid, code, image.",
 					}],
@@ -330,6 +495,83 @@ export default function (pi: ExtensionAPI) {
 					content: [{ type: "text", text: `Pushed option "${parsedOption.label}" to slide ${slideId}.` }],
 					details: { status: "generate-more", url: activeDeckServer.handle.url, slideId },
 				};
+			}
+
+			if (p.action === "add-options") {
+				if (pendingDeckResult) {
+					const result = pendingDeckResult;
+					pendingDeckResult = null;
+					return result;
+				}
+
+				if (!activeDeckServer) {
+					return {
+						content: [{ type: "text", text: "No active design deck session. Start a new deck before adding options." }],
+						details: { status: "error", url: "" },
+					};
+				}
+
+				if (activeDeckServer.currentResolve !== null) {
+					return {
+						content: [{ type: "text", text: "Design deck is not waiting for new options right now." }],
+						details: { status: "error", url: activeDeckServer.handle.url },
+					};
+				}
+
+				const slideId = p.slideId as string;
+				const optionsStr = p.options as string;
+
+				let parsedOptions: unknown;
+				try {
+					parsedOptions = JSON.parse(optionsStr);
+				} catch (err) {
+					activeDeckServer.handle.cancelGenerate();
+					const message = err instanceof Error ? err.message : String(err);
+					const snippet = optionsStr.length > 300 ? optionsStr.slice(0, 300) + "..." : optionsStr;
+					return {
+						content: [{ type: "text", text: `Invalid options JSON: ${message}\n\nReceived:\n${snippet}\n\nFix the JSON and call design_deck add-options again.` }],
+						details: { status: "error", url: activeDeckServer.handle.url },
+					};
+				}
+
+				if (!Array.isArray(parsedOptions)) {
+					activeDeckServer.handle.cancelGenerate();
+					return {
+						content: [{ type: "text", text: "options must be a JSON array of deck options. Fix and call design_deck add-options again." }],
+						details: { status: "error", url: activeDeckServer.handle.url },
+					};
+				}
+
+				for (const opt of parsedOptions) {
+					if (!isDeckOption(opt)) {
+						activeDeckServer.handle.cancelGenerate();
+						return {
+							content: [{ type: "text", text: "One or more options in the array are invalid — each needs label and either previewHtml or previewBlocks. Fix and call design_deck add-options again." }],
+							details: { status: "error", url: activeDeckServer.handle.url },
+						};
+					}
+				}
+
+				try {
+					for (const opt of parsedOptions) {
+						activeDeckServer.handle.pushOption(slideId, opt);
+					}
+				} catch (err) {
+					const message = err instanceof Error ? err.message : String(err);
+					return {
+						content: [{ type: "text", text: `Failed to push options: ${message}` }],
+						details: { status: "error", url: activeDeckServer.handle.url },
+					};
+				}
+
+				if (onUpdate) {
+					onUpdate({
+						content: [{ type: "text", text: `Pushed ${parsedOptions.length} options to slide ${slideId}.` }],
+						details: { status: "generate-more", url: activeDeckServer.handle.url, slideId },
+					});
+				}
+				attachDeckAbortHandler(signal);
+				return blockOnDeck();
 			}
 
 			if (p.action === "replace-options") {
@@ -409,7 +651,7 @@ export default function (pi: ExtensionAPI) {
 
 			pendingDeckResult = null;
 
-			if (activeDeckServer) {
+			if (activeDeckServer && p.action !== "export") {
 				return {
 					content: [
 						{
@@ -421,10 +663,61 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const slides = p.slides as string;
+			const settings = loadSettings();
+			const snapshotDir = resolveSnapshotDir(settings.snapshotDir);
+			let slides = p.slides as string;
+			if (p.action === "open" || p.action === "export") {
+				const deckId = (p.deckId as string).trim();
+				const deckPath = resolveDeckFilePath(snapshotDir, deckId);
+				if (!deckPath || !fs.existsSync(deckPath)) {
+					const { decks } = listSavedDecks(snapshotDir);
+					const availableHint = decks.length > 0
+						? ` Available deck IDs: ${decks.slice(0, 10).map((deck) => deck.id).join(", ")}`
+						: " Snapshot directory is empty.";
+					return {
+						content: [{ type: "text", text: `Saved deck "${deckId}" not found in ${snapshotDir}.${availableHint}` }],
+						details: { status: "error", url: "" },
+					};
+				}
+				if (p.action === "export") {
+					const format = typeof p.format === "string" && p.format.trim() !== "" ? p.format.trim().toLowerCase() : "html";
+					if (format !== "html") {
+						return {
+							content: [{ type: "text", text: `Unsupported export format: ${format}` }],
+							details: { status: "error", url: "" },
+						};
+					}
+					try {
+						const saved = validateSavedDeck(JSON.parse(fs.readFileSync(deckPath, "utf-8")));
+						const enrichedSaved: SavedDeckData = {
+							...saved,
+							id: saved.id ?? deckId,
+							status: saved.status ?? deriveDeckStatusFromFolderName(deckId),
+						};
+						const html = buildStandaloneDeckHtml(deckPath, enrichedSaved);
+						const exportPath = path.join(path.dirname(deckPath), "export.html");
+						fs.writeFileSync(exportPath, html, "utf-8");
+						const relativePath = exportPath.startsWith(os.homedir())
+							? "~" + exportPath.slice(os.homedir().length)
+							: exportPath;
+						return {
+							content: [{ type: "text", text: `Exported HTML to ${relativePath}` }],
+						};
+					} catch (err) {
+						const message = err instanceof Error ? err.message : String(err);
+						return {
+							content: [{ type: "text", text: `Failed to export deck "${deckId}": ${message}` }],
+							details: { status: "error", url: "" },
+						};
+					}
+				}
+				slides = deckPath;
+			}
 
 			let configData: unknown;
 			let savedSelections: Record<string, string> | undefined;
+			let savedNotes: Record<string, { label: string; notes: string }> | undefined;
+			let savedFinalNotes: string | undefined;
 			try {
 				configData = JSON.parse(slides);
 			} catch {
@@ -433,37 +726,13 @@ export default function (pi: ExtensionAPI) {
 				if (!fs.existsSync(absolutePath)) {
 					throw new Error(`Invalid slides: not valid JSON and file not found at ${absolutePath}`);
 				}
-				const content = fs.readFileSync(absolutePath, "utf-8");
-				let fileData: unknown;
-				try {
-					fileData = JSON.parse(content);
-				} catch (parseErr) {
-					const message = parseErr instanceof Error ? parseErr.message : String(parseErr);
-					throw new Error(`Invalid JSON in saved deck file: ${message}`);
-				}
-				const raw = fileData as Record<string, unknown>;
-				if (raw.config && typeof raw.config === "object") {
-					const saved = validateSavedDeck(fileData);
-					configData = saved.config;
-					savedSelections = Object.keys(saved.selections).length > 0 ? saved.selections : undefined;
-					const snapshotDir = path.dirname(absolutePath);
-					for (const slide of saved.config.slides) {
-						for (const option of slide.options) {
-							if (!option.previewBlocks) continue;
-							for (const block of option.previewBlocks) {
-								if (block.type === "image" && !path.isAbsolute(block.src)) {
-									block.src = path.join(snapshotDir, block.src);
-								}
-							}
-						}
-					}
-				} else {
-					configData = fileData;
-				}
+				const loaded = loadDeckFile(absolutePath);
+				configData = loaded.configData;
+				savedSelections = loaded.savedSelections;
+				savedNotes = loaded.savedNotes;
+				savedFinalNotes = loaded.savedFinalNotes;
 			}
 			const config = validateDeckConfig(configData);
-
-			const settings = loadSettings();
 			const sessionId = randomUUID();
 			const sessionToken = randomUUID();
 
@@ -567,8 +836,6 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			const themeConfig = settings.theme ?? {};
-			const snapshotDir = settings.snapshotDir ? expandHome(settings.snapshotDir) : undefined;
-
 			const currentModelStr = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null;
 			const availableModels: ModelInfo[] = ctx.modelRegistry.getAvailable().map((m) => ({
 				provider: m.provider,
@@ -592,6 +859,8 @@ export default function (pi: ExtensionAPI) {
 						toggleHotkey: themeConfig.toggleHotkey ?? DEFAULT_THEME_HOTKEY,
 					},
 					savedSelections,
+					savedNotes,
+					savedFinalNotes,
 					snapshotDir,
 					autoSaveOnSubmit: settings.autoSaveOnSubmit ?? true,
 					models: {
@@ -636,6 +905,13 @@ export default function (pi: ExtensionAPI) {
 			if (data.action === "add-option") {
 				return new Text(
 					theme.fg("toolTitle", theme.bold(`Design Deck: add option (${data.slideId || "unknown"})`)),
+					0,
+					0
+				);
+			}
+			if (data.action === "add-options") {
+				return new Text(
+					theme.fg("toolTitle", theme.bold(`Design Deck: add options (${data.slideId || "unknown"})`)),
 					0,
 					0
 				);

@@ -229,11 +229,24 @@ export interface SavedDeckData {
 	config: DeckConfig;
 	selections: Record<string, string>;
 	savedAt: string;
+	id?: string;
+	status?: "submitted" | "in-progress" | "cancelled";
+	modifiedAt?: string;
+	notes?: Record<string, string>;
+	finalNotes?: string;
 	savedFrom?: {
 		cwd: string;
 		branch: string | null;
 		sessionId: string;
 	};
+}
+
+export type SavedDeckStatus = NonNullable<SavedDeckData["status"]>;
+
+export function deriveDeckStatusFromFolderName(folderName: string): SavedDeckStatus {
+	if (folderName.endsWith("-submitted")) return "submitted";
+	if (folderName.endsWith("-cancelled")) return "cancelled";
+	return "in-progress";
 }
 
 export function validateSavedDeck(data: unknown): SavedDeckData {
@@ -251,10 +264,27 @@ export function validateSavedDeck(data: unknown): SavedDeckData {
 		}
 	}
 
+	const notes: Record<string, string> = {};
+	if (obj.notes && typeof obj.notes === "object" && !Array.isArray(obj.notes)) {
+		for (const [key, val] of Object.entries(obj.notes as Record<string, unknown>)) {
+			if (typeof val === "string") notes[key] = val;
+		}
+	}
+
+	const status =
+		obj.status === "submitted" || obj.status === "in-progress" || obj.status === "cancelled"
+			? obj.status
+			: undefined;
+
 	return {
 		config,
 		selections,
 		savedAt: typeof obj.savedAt === "string" ? obj.savedAt : new Date().toISOString(),
+		id: typeof obj.id === "string" && obj.id.trim() !== "" ? obj.id : undefined,
+		status,
+		modifiedAt: typeof obj.modifiedAt === "string" ? obj.modifiedAt : undefined,
+		notes: Object.keys(notes).length > 0 ? notes : undefined,
+		finalNotes: typeof obj.finalNotes === "string" ? obj.finalNotes : undefined,
 		savedFrom: obj.savedFrom && typeof obj.savedFrom === "object"
 			? obj.savedFrom as SavedDeckData["savedFrom"]
 			: undefined,
